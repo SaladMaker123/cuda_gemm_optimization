@@ -50,8 +50,14 @@ int main()
 
     std::mt19937 rng(1234);
     std::uniform_real_distribution<float> dist(-1.0f,1.0f);
-    for(auto& x : hA) x = __float2half(dist(rng));
-    for(auto& x : hB) x = __float2half(dist(rng));
+    for(auto& x : hA)
+    {
+       x = __float2half(dist(rng)); 
+    } 
+    for(auto& x : hB)
+    {
+        x = __float2half(dist(rng));
+    }
 
     __half* dA = nullptr;
     __half* dB = nullptr;
@@ -128,7 +134,10 @@ int main()
 
     std::cout << "Max difference: " << maxDiff << std::endl;
 
-    if (errors != 0) return 1;
+    if (errors != 0) 
+    {
+        return 1;
+    }
 
     // Warmup
      for (int i = 0; i < WARMUP; ++i) {
