@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# GEMM project environment: RTX 5090 + CUDA 13.0 + Nsight Compute 2025.2.0
+# GEMM project environment: GeForce RTX 50 series + CUDA 13.0 + Nsight Compute 2025.2.0
 CUDA_PKG="cuda-toolkit-13-0"
 CUDA_VERSION="13.0.3-1"
 NCU_PKG="nsight-compute-2025.2.0"
@@ -14,7 +14,7 @@ if [[ "${EUID}" -ne 0 ]]; then
     exit 1
 fi
 
-# This project is tested on Ubuntu 22.04/24.04 x86-64 with an RTX 5090.
+# Target environment: Ubuntu 22.04/24.04 x86-64 with GeForce RTX 50 series.
 source /etc/os-release
 if [[ "${ID}" != "ubuntu" || "${VERSION_ID}" != "22.04" && "${VERSION_ID}" != "24.04" ]]; then
     echo "ERROR: Ubuntu 22.04 or 24.04 is required."
@@ -33,8 +33,12 @@ GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n 1)"
 DRIVER_VERSION="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n 1)"
 echo "GPU: ${GPU_NAME}"
 echo "Driver: ${DRIVER_VERSION}"
-if [[ "${GPU_NAME}" != *"RTX 5090"* ]]; then
-    echo "ERROR: This benchmark project is pinned to RTX 5090."
+if [[ "${GPU_NAME}" != *"RTX 5050"* &&
+      "${GPU_NAME}" != *"RTX 5060"* &&
+      "${GPU_NAME}" != *"RTX 5070"* &&
+      "${GPU_NAME}" != *"RTX 5080"* &&
+      "${GPU_NAME}" != *"RTX 5090"* ]]; then
+    echo "ERROR: This project requires GeForce RTX 50 series."
     exit 1
 fi
 if [[ "${DRIVER_VERSION%%.*}" -lt 580 ]]; then
@@ -90,11 +94,16 @@ fi
 
 nvcc --version
 ncu --version
+
+if ! nvcc --version | grep -Fq "release 13.0"; then
+    echo "ERROR: CUDA Toolkit version mismatch."
+    exit 1
+fi
+
 if ! ncu --version | grep -Fq "Version 2025.2.0.0"; then
     echo "ERROR: Nsight Compute version mismatch."
     exit 1
 fi
-
 # A real profiling run is needed: ncu --version alone cannot confirm permission.
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TEMP_DIR}"' EXIT
@@ -141,5 +150,4 @@ else
     fi
     exit 1
 fi
-
-echo "Environment ready: RTX 5090 + CUDA 13.0 + Nsight Compute 2025.2.0."
+echo "Environment ready: ${GPU_NAME} + CUDA 13.0 + Nsight Compute 2025.2.0."
