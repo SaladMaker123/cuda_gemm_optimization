@@ -81,8 +81,8 @@ else
 fi
 
 # Enable commands now and in future root SSH sessions.
-export PATH="${CUDA_DIR}:${NCU_DIR}:${PATH}"
-ENV_LINE='export PATH=/usr/local/cuda-13.0/bin:/opt/nvidia/nsight-compute/2025.2.0:$PATH'
+export PATH="${NCU_DIR}:${CUDA_DIR}:${PATH}"
+ENV_LINE='export PATH=/opt/nvidia/nsight-compute/2025.2.0:/usr/local/cuda-13.0/bin:$PATH'
 touch /root/.bashrc
 if ! grep -Fxq "${ENV_LINE}" /root/.bashrc; then
     printf '\n%s\n' "${ENV_LINE}" >> /root/.bashrc
@@ -90,6 +90,10 @@ fi
 
 nvcc --version
 ncu --version
+if ! ncu --version | grep -Fq "Version 2025.2.0.0"; then
+    echo "ERROR: Nsight Compute version mismatch."
+    exit 1
+fi
 
 # A real profiling run is needed: ncu --version alone cannot confirm permission.
 TEMP_DIR="$(mktemp -d)"
