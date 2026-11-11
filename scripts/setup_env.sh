@@ -28,6 +28,37 @@ if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "ERROR: nvidia-smi is unavailable. Check the GPU driver/VM first."
     exit 1
 fi
+# Check loaded and installed NVIDIA driver versions.
+if [[ -r /proc/driver/nvidia/version ]]; then
+    LOADED_DRIVER="$(awk 'NR == 1 {
+        for (i = 1; i <= NF; ++i) {
+            if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) {
+                print $i
+                exit
+            }
+        }
+    }' /proc/driver/nvidia/version)"
+
+    INSTALLED_DRIVER="$(modinfo -F version nvidia 2>/dev/null || true)"
+
+    echo "Loaded NVIDIA Driver: ${LOADED_DRIVER}"
+    echo "Installed NVIDIA Driver: ${INSTALLED_DRIVER}"
+
+    if [[ -n "${LOADED_DRIVER}" &&
+          -n "${INSTALLED_DRIVER}" &&
+          "${LOADED_DRIVER}" != "${INSTALLED_DRIVER}" ]]; then
+        echo "ERROR: NVIDIA Driver version mismatch."
+        echo "Please reboot the GPU instance and run this script again."
+        exit 1
+    fi
+fi
+
+# Verify that NVML can initialize successfully.
+if ! nvidia-smi -L; then
+    echo "ERROR: NVIDIA GPU initialization failed."
+    echo "Check the NVIDIA Driver and NVML compatibility."
+    exit 1
+fi
 
 GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n 1)"
 DRIVER_VERSION="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n 1)"
