@@ -84,13 +84,44 @@ else
     echo "Pinned CUDA Toolkit and Nsight Compute are already installed."
 fi
 
-# Enable commands now and in future root SSH sessions.
-export PATH="${NCU_DIR}:${CUDA_DIR}:${PATH}"
-ENV_LINE='export PATH=/opt/nvidia/nsight-compute/2025.2.0:/usr/local/cuda-13.0/bin:$PATH'
+
+# Persist command paths for future root login shells.
+ENV_FILE="/etc/profile.d/cuda-gemm-env.sh"
+ENV_LINE="export PATH=${NCU_DIR}:${CUDA_DIR}:\$PATH"
+
+printf '%s\n' \
+    "# CUDA GEMM project: pinned CUDA and Nsight Compute paths" \
+    "${ENV_LINE}" > "${ENV_FILE}"
+
+chmod 644 "${ENV_FILE}"
+
+# Also configure interactive root Bash sessions.
 touch /root/.bashrc
 if ! grep -Fxq "${ENV_LINE}" /root/.bashrc; then
     printf '\n%s\n' "${ENV_LINE}" >> /root/.bashrc
 fi
+
+# Apply the paths to this script and its child processes.
+export PATH="${NCU_DIR}:${CUDA_DIR}:${PATH}"
+hash -r
+
+# Verify that the expected executables are selected.
+NVCC_PATH="$(command -v nvcc || true)"
+NCU_PATH="$(command -v ncu || true)"
+
+echo "nvcc path: ${NVCC_PATH}"
+echo "ncu path: ${NCU_PATH}"
+
+if [[ "${NVCC_PATH}" != "${CUDA_DIR}/nvcc" ]]; then
+    echo "ERROR: nvcc resolved to an unexpected path."
+    exit 1
+fi
+
+if [[ "${NCU_PATH}" != "${NCU_DIR}/ncu" ]]; then
+    echo "ERROR: ncu resolved to an unexpected path."
+    exit 1
+fi
+
 
 nvcc --version
 ncu --version
