@@ -31,25 +31,10 @@ __global__ void gemmV2R8(
     __shared__ __half sB[BK][BN];
 
     int tid = threadIdx.y * blockDim.x + threadIdx.x;
-
-    int row0 = blockIdx.y * BM + threadIdx.y;
-    int row1 = row0 + blockDim.y;
-    int row2 = row1 + blockDim.y;
-    int row3 = row2 + blockDim.y;
-    int row4 = row3 + blockDim.y;
-    int row5 = row4 + blockDim.y;
-    int row6 = row5 + blockDim.y;
-    int row7 = row6 + blockDim.y;
     int col = blockIdx.x * BN + threadIdx.x;
 
-    float sum0 = 0.0f;
-    float sum1 = 0.0f;
-    float sum2 = 0.0f;
-    float sum3 = 0.0f;
-    float sum4 = 0.0f;
-    float sum5 = 0.0f;
-    float sum6 = 0.0f;
-    float sum7 = 0.0f;
+    constexpr int R = 8;
+    float sum[R] = {};
 
     for (int phase = 0; phase < K / BK; ++phase)
     {
@@ -90,63 +75,38 @@ __global__ void gemmV2R8(
         // Wait for all threads to finish loading
         __syncthreads();
 
-        // Compute two C elements per thread
-        for (int k = 0; k < BK; ++k)
-        {
-            float b = __half2float(sB[k][threadIdx.x]);
+        // Compute eight C elements per thread
+    for (int k = 0; k < BK; ++k)
+    {
+        float b = __half2float(sB[k][threadIdx.x]);
 
-            sum0 += __half2float(sA[threadIdx.y][k]) * b;
-            sum1 += __half2float(sA[threadIdx.y + blockDim.y][k]) * b;
-            sum2 += __half2float(sA[threadIdx.y + blockDim.y * 2][k]) * b;
-            sum3 += __half2float(sA[threadIdx.y + blockDim.y * 3][k]) * b;
-            sum4 += __half2float(sA[threadIdx.y + 4 * blockDim.y][k]) * b;
-            sum5 += __half2float(sA[threadIdx.y + 5 * blockDim.y][k]) * b;
-            sum6 += __half2float(sA[threadIdx.y + 6 * blockDim.y][k]) * b;
-            sum7 += __half2float(sA[threadIdx.y + 7 * blockDim.y][k]) * b;
+        #pragma unroll
+        for (int r = 0; r < R; ++r)
+        {
+            sum[r] += __half2float(
+                sA[threadIdx.y + r * blockDim.y][k]
+            ) * b;
         }
+    }
 
         // Wait for all threads to finish using current Tile
         __syncthreads();
     }
 
-    // Store C
-    if (row0 < M && col < N)
+   // Store C
+    #pragma unroll
+    for (int r = 0; r < R; ++r)
     {
-        C[row0 * N + col] = sum0;
-    }
+        int row = blockIdx.y * BM
+                + threadIdx.y
+                + r * blockDim.y;
 
-    if (row1 < M && col < N)
-    {
-        C[row1 * N + col] = sum1;
-    }
-    if(row2 < M && col < N)
-    {
-        C[row2 * N + col] = sum2;
-    }
-    if(row3 < M && col < N)
-    {
-        C[row3 * N + col] = sum3;
-    }
-    if (row4 < M && col < N)
-    {
-        C[row4 * N + col] = sum4;
-    }
-
-    if (row5 < M && col < N)
-    {
-        C[row5 * N + col] = sum5;
-    }
-
-    if (row6 < M && col < N)
-    {
-        C[row6 * N + col] = sum6;
-    }
-
-    if (row7 < M && col < N)
-    {
-        C[row7 * N + col] = sum7;
-    }
-    }
+        if (row < M && col < N)
+        {
+            C[row * N + col] = sum[r];
+        }
+    }   
+}
 
 int main()
 {
