@@ -16,6 +16,7 @@ constexpr int BM = 64;
 constexpr int BN = 64;
 constexpr int BK = 32;
 
+// V8 8x2 Register Tiling GEMM: 128-bit Global Load + Shared Store
 __global__ void gemmV8RegisterTiling8x2(
     const __half* A,
     const __half* B,
@@ -29,18 +30,13 @@ __global__ void gemmV8RegisterTiling8x2(
     __shared__ __align__(16) __half sB[BK][BN];
 
     int tid = threadIdx.y * blockDim.x + threadIdx.x;
-    int col = blockIdx.x * BN + threadIdx.x * 2;
 
     float sum[8][2] = {};
 
     for (int phase = 0; phase < K / BK; ++phase)
     {
-        // =====================================
-        // 1. Load A Tile
-        // =====================================
-
-        for (int idx = tid;
-             idx < BM * (BK / 8);
+        // 1. Global Memory -> Shared Memory: A tile
+        for (int idx = tid; idx < BM * (BK / 8);
              idx += blockDim.x * blockDim.y)
         {
             int aRow = idx / (BK / 8);
@@ -49,22 +45,15 @@ __global__ void gemmV8RegisterTiling8x2(
             int globalRow = blockIdx.y * BM + aRow;
             int globalCol = phase * BK + aCol;
 
-            if (globalRow < M &&
-                globalCol + 7 < K &&
-                K % 8 == 0)
+            if (globalRow < M && globalCol + 7 < K && K % 8 == 0)
             {
-                const uint4* ptr =
-                    reinterpret_cast<const uint4*>(
-                        A + globalRow * K + globalCol
-                    );
-
+                const uint4* ptr = reinterpret_cast<const uint4*>(
+                    A + globalRow * K + globalCol
+                );
                 uint4 value = *ptr;
-
-                uint4* dst =
-                    reinterpret_cast<uint4*>(
-                        &sA[aRow][aCol]
-                    );
-
+                uint4* dst = reinterpret_cast<uint4*>(
+                    &sA[aRow][aCol]
+                );
                 *dst = value;
             }
             else
@@ -73,7 +62,6 @@ __global__ void gemmV8RegisterTiling8x2(
                 for (int i = 0; i < 8; ++i)
                 {
                     int globalCol2 = globalCol + i;
-
                     sA[aRow][aCol + i] =
                         (globalRow < M && globalCol2 < K)
                             ? A[globalRow * K + globalCol2]
@@ -82,12 +70,8 @@ __global__ void gemmV8RegisterTiling8x2(
             }
         }
 
-        // =====================================
-        // 2. Load B Tile
-        // =====================================
-
-        for (int idx = tid;
-             idx < BK * (BN / 8);
+        // 2. Global Memory -> Shared Memory: B tile
+        for (int idx = tid; idx < BK * (BN / 8);
              idx += blockDim.x * blockDim.y)
         {
             int bRow = idx / (BN / 8);
@@ -96,22 +80,15 @@ __global__ void gemmV8RegisterTiling8x2(
             int globalRow = phase * BK + bRow;
             int globalCol = blockIdx.x * BN + bCol;
 
-            if (globalRow < K &&
-                globalCol + 7 < N &&
-                N % 8 == 0)
+            if (globalRow < K && globalCol + 7 < N && N % 8 == 0)
             {
-                const uint4* ptr =
-                    reinterpret_cast<const uint4*>(
-                        B + globalRow * N + globalCol
-                    );
-
+                const uint4* ptr = reinterpret_cast<const uint4*>(
+                    B + globalRow * N + globalCol
+                );
                 uint4 value = *ptr;
-
-                uint4* dst =
-                    reinterpret_cast<uint4*>(
-                        &sB[bRow][bCol]
-                    );
-
+                uint4* dst = reinterpret_cast<uint4*>(
+                    &sB[bRow][bCol]
+                );
                 *dst = value;
             }
             else
@@ -120,7 +97,6 @@ __global__ void gemmV8RegisterTiling8x2(
                 for (int i = 0; i < 8; ++i)
                 {
                     int globalCol2 = globalCol + i;
-
                     sB[bRow][bCol + i] =
                         (globalRow < K && globalCol2 < N)
                             ? B[globalRow * N + globalCol2]
@@ -129,16 +105,10 @@ __global__ void gemmV8RegisterTiling8x2(
             }
         }
 
-        // =====================================
-        // 3. Synchronize
-        // =====================================
-
+        // All threads finish loading before computation.
         __syncthreads();
 
-        // =====================================
-        // 4. Compute: 8 x 2 Register Tiling
-        // =====================================
-
+        // 3. Compute: 8 rows x 2 columns per thread
         for (int k = 0; k < BK; ++k)
         {
             float regA[8];
@@ -171,36 +141,29 @@ __global__ void gemmV8RegisterTiling8x2(
             }
         }
 
-        // =====================================
-        // 5. Synchronize before next phase
-        // =====================================
-
+        // All threads finish reading this tile before it is overwritten.
         __syncthreads();
     }
 
-    // =====================================
-    // 6. Store C
-    // =====================================
-
+    // 4. Register -> Global Memory: store 8x2 results
     #pragma unroll
     for (int r = 0; r < 8; ++r)
     {
-        int row = blockIdx.y * BM
-                + threadIdx.y
-                + r * blockDim.y;
-
         #pragma unroll
         for (int c = 0; c < 2; ++c)
         {
-            if (row < M && col + c < N)
+            int row = blockIdx.y * BM
+                    + threadIdx.y + r * blockDim.y;
+            int col = blockIdx.x * BN
+                    + threadIdx.x * 2 + c;
+
+            if (row < M && col < N)
             {
-                C[row * N + col + c] = sum[r][c];
+                C[row * N + col] = sum[r][c];
             }
         }
     }
 }
-
-
 
 int main()
 {
@@ -266,7 +229,7 @@ int main()
     const float alpha = 1.0f;
     const float beta = 0.0f;
 
-    // Row-major C = A * B evaluated through cuBLAS column-major interface.
+    // Row-major C=A*B via the column-major cuBLAS interface.
     CUBLAS_CHECK(cublasGemmEx(
         handle,
         CUBLAS_OP_N, CUBLAS_OP_N,
